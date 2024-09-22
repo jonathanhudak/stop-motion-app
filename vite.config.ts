@@ -6,7 +6,6 @@ import adapter from '@sveltejs/adapter-vercel';
 export default defineConfig({
 	server: { https: true },
 	plugins: [sveltekit(), ...(process.env.NODE_ENV === 'production' ? [] : [mkcert()])],
-	preprocess: vitePreprocess(),
 	kit: {
 		adapter: adapter({
 			runtime: 'nodejs18.x'
