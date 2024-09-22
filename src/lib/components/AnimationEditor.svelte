@@ -385,8 +385,10 @@
 			const transaction = db.transaction(['animations'], 'readwrite');
 			const objectStore = transaction.objectStore('animations');
 
-			// First, delete the old entry
-			await objectStore.delete(currentAnimationName);
+			// First, delete the old entry if it exists
+			if (currentAnimationName) {
+				await objectStore.delete(currentAnimationName);
+			}
 
 			// Then, add the updated entry
 			const updatedAnimation = { name: editedName.trim(), frames: frames };
@@ -438,13 +440,11 @@
 		</div>
 
 		<div class="controls">
-			{#if id !== null}
-				<button on:click={captureFrame}>Add Frame</button>
-				<button on:click={switchCamera}>Switch Camera</button>
-				<button on:click={togglePreview}
-					>{isPreviewActive ? 'Stop Preview' : 'Start Preview'}</button
-				>
-			{/if}
+			<button on:click={captureFrame}>Add Frame</button>
+			<button on:click={switchCamera}>Switch Camera</button>
+			<button on:click={togglePreview}>
+				{isPreviewActive ? 'Stop Preview' : 'Start Preview'}
+			</button>
 			<button on:click={() => playAnimation(currentFrameIndex !== -1 ? currentFrameIndex : 0)}>
 				Play Animation
 			</button>
@@ -456,7 +456,6 @@
 			</select>
 			<input type="text" bind:value={currentAnimationName} placeholder="Animation name" />
 			<button on:click={saveAnimation}>Save Animation</button>
-			<!-- Add this button -->
 			{#if id !== null}
 				<button on:click={deleteAnimation} class="delete-button">Delete Animation</button>
 			{/if}
@@ -669,12 +668,9 @@
 	h1 {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
+		justify-content: center;
+		margin-bottom: 1rem;
 		font-size: 2rem;
-		max-width: 1200px;
-		margin: auto;
-		padding: 0 1rem;
-		box-sizing: border-box;
 	}
 
 	:global(.dark h1) {
