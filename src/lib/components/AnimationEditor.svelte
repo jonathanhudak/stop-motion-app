@@ -523,7 +523,7 @@
 	}
 
 	button:hover,
-	button:focus {
+	button:active {
 		background: plum;
 	}
 
