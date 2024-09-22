@@ -1,20 +1,15 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import mkcert from 'vite-plugin-mkcert';
-import adapter from '@sveltejs/adapter-static';
-import { vitePreprocess } from '@sveltejs/kit/vite';
+import adapter from '@sveltejs/adapter-vercel';
 
 export default defineConfig({
 	server: { https: true },
-	plugins: [sveltekit(), mkcert()],
+	plugins: [sveltekit(), ...(process.env.NODE_ENV === 'production' ? [] : [mkcert()])],
 	preprocess: vitePreprocess(),
 	kit: {
 		adapter: adapter({
-			fallback: '404.html'
+			runtime: 'nodejs18.x'
 		})
 	}
 });
-
-config.paths = { base: process.argv.includes('dev') ? '' : process.env.BASE_PATH };
-
-export default config;
