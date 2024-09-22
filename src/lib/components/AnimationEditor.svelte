@@ -15,6 +15,7 @@
 	let filter: string = 'none';
 	let currentAnimationName: string = '';
 	let db: IDBDatabase | null = null;
+	let currentFrameIndex: number = -1;
 
 	// Function to start the camera
 	function startCamera(facingMode: 'user' | 'environment') {
@@ -83,7 +84,7 @@
 	}
 
 	// Function to play animation
-	async function playAnimation() {
+	async function playAnimation(startIndex: number = 0) {
 		if (isPreviewActive) {
 			isPreviewActive = false;
 			if (previewRequestId) {
@@ -96,7 +97,8 @@
 			return;
 		}
 
-		for (let i = 0; i < frames.length; i++) {
+		for (let i = startIndex; i < frames.length; i++) {
+			currentFrameIndex = i;
 			await new Promise<void>((resolve) => {
 				const img = new Image();
 				img.onload = () => {
@@ -111,6 +113,7 @@
 		}
 
 		console.log('Animation playback completed');
+		currentFrameIndex = -1;
 	}
 
 	// Function to switch camera
@@ -249,6 +252,7 @@
 					console.log('Frames loaded:', frames.length);
 					currentAnimationName = animation.name;
 					if (frames.length > 0) {
+						currentFrameIndex = 0; // Set to first frame
 						const img = new Image();
 						img.onload = () => {
 							if (canvas && context) {
@@ -337,6 +341,30 @@
 			alert('An error occurred while deleting the animation');
 		}
 	}
+
+	function selectFrame(index: number) {
+		currentFrameIndex = index;
+		if (isPreviewActive) {
+			togglePreview();
+		}
+		if (frames[index]) {
+			const img = new Image();
+			img.onload = () => {
+				if (context) {
+					context.clearRect(0, 0, canvas.width, canvas.height);
+					context.drawImage(img, 0, 0, canvas.width, canvas.height);
+				}
+			};
+			img.src = frames[index];
+		}
+	}
+
+	function addNewFrame() {
+		isPreviewActive = true;
+		currentFrameIndex = frames.length;
+		startCamera(currentFacingMode);
+		drawPreview();
+	}
 </script>
 
 <div class="container">
@@ -345,6 +373,17 @@
 			<track kind="captions" src="" label="Empty captions" />
 		</video>
 		<canvas id="canvas"></canvas>
+		{#if isPreviewActive}
+			<div
+				role="button"
+				tabindex="0"
+				class="capture-button"
+				on:click={captureFrame}
+				on:keydown={(e) => e.key === 'Enter' && captureFrame()}
+			>
+				<span class="gradient"></span>
+			</div>
+		{/if}
 	</div>
 	<div class="controls">
 		{#if !id}
@@ -352,7 +391,9 @@
 			<button on:click={switchCamera}>Switch Camera</button>
 			<button on:click={togglePreview}>{isPreviewActive ? 'Stop Preview' : 'Start Preview'}</button>
 		{/if}
-		<button on:click={playAnimation}>Play Animation</button>
+		<button on:click={() => playAnimation(currentFrameIndex !== -1 ? currentFrameIndex : 0)}>
+			Play Animation
+		</button>
 		<button on:click={deleteCurrentFrame}>Delete Current Frame</button>
 		<select bind:value={filter}>
 			<option value="none">None</option>
@@ -364,6 +405,23 @@
 		<!-- Add this button -->
 		{#if id !== null}
 			<button on:click={deleteAnimation} class="delete-button">Delete Animation</button>
+		{/if}
+	</div>
+	<div class="timeline">
+		{#each frames as frame, index}
+			<button
+				class="frame"
+				class:active={index === currentFrameIndex}
+				on:click={() => selectFrame(index)}
+			>
+				<span class="frame-number">{index + 1}</span>
+				<img src={frame} alt={`Frame ${index + 1}`} />
+			</button>
+		{/each}
+		{#if frames.length > 0 && !isPreviewActive}
+			<button class="add-frame" on:click={addNewFrame}>
+				<span class="plus">+</span>
+			</button>
 		{/if}
 	</div>
 </div>
@@ -381,6 +439,7 @@
 		aspect-ratio: 4 / 3; /* Changed from 16 / 9 for a larger vertical space */
 		overflow: hidden;
 		margin-bottom: 1rem;
+		position: relative;
 	}
 	canvas {
 		width: 100%;
@@ -408,29 +467,126 @@
 		-moz-user-select: none;
 		-ms-user-select: none;
 	}
-	button {
+
+	.timeline {
+		display: flex;
+		overflow-x: auto;
+		gap: 0.5rem;
+		padding: 1rem 0;
+	}
+
+	.frame {
+		flex: 0 0 auto;
+		border: 2px solid #ddd;
+		border-radius: 4px;
+		overflow: hidden;
 		cursor: pointer;
-		background-color: #4caf50;
+		transition:
+			border-color 0.3s,
+			opacity 0.3s;
+		position: relative;
+		opacity: 0.5;
+	}
+
+	.frame:hover {
+		border-color: #4caf50;
+		opacity: 0.8;
+	}
+
+	.frame.active {
+		border-color: #4caf50;
+		opacity: 1;
+	}
+
+	.frame img {
+		width: 200px;
+		height: 150px;
+		object-fit: cover;
+	}
+
+	.frame-number {
+		position: absolute;
+		top: 5px;
+		left: 5px;
+		background-color: rgba(0, 0, 0, 0.6);
 		color: white;
-		border: none;
-		border-radius: 4px;
-		transition: background-color 0.3s;
-	}
-	button:active {
-		background-color: #45a049;
-	}
-	select,
-	input {
-		background-color: #f8f8f8;
-		border: 1px solid #ddd;
-		border-radius: 4px;
+		padding: 2px 6px;
+		border-radius: 3px;
+		font-size: 0.8rem;
 	}
 
-	.delete-button {
-		background-color: #f44336;
+	.add-frame {
+		flex: 0 0 auto;
+		width: 200px;
+		height: 150px;
+		border: 2px dashed #ddd;
+		border-radius: 4px;
+		background: none;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
-	.delete-button:active {
-		background-color: #d32f2f;
+	.plus {
+		font-size: 3rem;
+		color: #4caf50;
+	}
+
+	.capture-button {
+		appearance: none;
+		position: absolute;
+		/* background: gold; */
+		right: 1rem;
+		top: 50%;
+		transform: translateY(-50%);
+		display: block;
+		min-width: none;
+		height: 100px;
+		width: 100px;
+		border-radius: 50%;
+		box-sizing: border-box;
+		overflow: hidden;
+		box-shadow: 0 0 3px 1px rgba(0, 0, 0, 0.6);
+		/* background: rgb(4, 4, 189);
+		background: radial-gradient(circle, rgba(4, 4, 189, 1) 13%, rgba(2, 0, 36, 1) 100%);
+		transition: background 0.5s ease; */
+	}
+
+	/* .capture-button:hover,
+	.capture-button:focus {
+		background: rgb(40, 40, 255);
+		background: radial-gradient(
+			circle,
+			rgba(40, 40, 255, 1) 9%,
+			rgba(40, 40, 255, 1) 46%,
+			rgba(2, 0, 36, 1) 100%
+		);
+	} */
+
+	.gradient {
+		position: relative;
+		display: block;
+		border-radius: 50%;
+		width: 100px;
+		height: 100px;
+		background-image: linear-gradient(to right, hsl(211, 100%, 50%), hsl(179, 100%, 30%));
+		z-index: 1;
+	}
+
+	.gradient::before {
+		position: absolute;
+		content: '';
+		top: 0;
+		right: 0;
+		bottom: 0;
+		left: 0;
+		background-image: linear-gradient(to bottom, hsl(344, 100%, 50%), hsl(31, 100%, 40%));
+		z-index: -1;
+		transition: opacity 0.3s ease-out;
+		opacity: 0;
+	}
+	.gradient:hover::before {
+		opacity: 1;
 	}
 </style>

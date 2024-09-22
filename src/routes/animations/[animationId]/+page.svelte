@@ -11,10 +11,3 @@
 {:else}
 	<p>Loading animation...</p>
 {/if}
-
-<style>
-	:global(body) {
-		margin: 0;
-		padding: 0;
-	}
-</style>
