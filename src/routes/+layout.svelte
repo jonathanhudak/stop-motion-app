@@ -42,6 +42,7 @@
 		transition:
 			background-color 0.3s,
 			color 0.3s;
+		font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 	}
 
 	:global(.dark) {
@@ -63,6 +64,18 @@
 		transition:
 			background-color 0.3s,
 			color 0.3s;
+	}
+
+	.active {
+		font-weight: bold;
+	}
+
+	:global(.dark nav a.active) {
+		color: aqua;
+	}
+
+	:global(.dark nav a) {
+		color: white;
 	}
 
 	button {

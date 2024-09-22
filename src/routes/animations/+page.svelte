@@ -49,6 +49,15 @@
 		padding: 0.5rem;
 		text-align: center;
 	}
+
+	:global(.dark .tile a) {
+		color: aqua;
+	}
+
+	:global(.dark .tile a) {
+		color: white;
+	}
+
 	.thumbnail {
 		width: 100%;
 		height: auto;

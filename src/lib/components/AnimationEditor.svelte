@@ -16,6 +16,8 @@
 	let currentAnimationName: string = '';
 	let db: IDBDatabase | null = null;
 	let currentFrameIndex: number = -1;
+	let isEditing = false;
+	let editedName = '';
 
 	// Function to start the camera
 	function startCamera(facingMode: 'user' | 'environment') {
@@ -365,47 +367,100 @@
 		startCamera(currentFacingMode);
 		drawPreview();
 	}
+
+	function toggleEdit() {
+		isEditing = !isEditing;
+		if (isEditing) {
+			editedName = currentAnimationName;
+		}
+	}
+
+	async function saveEdit() {
+		if (!db || !editedName.trim()) {
+			alert('Please enter a valid name for the animation.');
+			return;
+		}
+
+		try {
+			const transaction = db.transaction(['animations'], 'readwrite');
+			const objectStore = transaction.objectStore('animations');
+
+			// First, delete the old entry
+			await objectStore.delete(currentAnimationName);
+
+			// Then, add the updated entry
+			const updatedAnimation = { name: editedName.trim(), frames: frames };
+			await objectStore.add(updatedAnimation);
+
+			currentAnimationName = editedName.trim();
+			isEditing = false;
+			alert('Animation updated successfully!');
+		} catch (error) {
+			console.error('Error updating animation:', error);
+			alert('Error updating animation. Please try again.');
+		}
+	}
 </script>
 
+{#if id !== null}
+	{#if isEditing}
+		<div class="edit-name">
+			<input type="text" bind:value={editedName} placeholder="Enter new name" />
+			<button on:click={saveEdit}>Save</button>
+			<button on:click={toggleEdit}>Cancel</button>
+		</div>
+	{:else}
+		<h1>
+			{currentAnimationName}
+			<button class="edit-button" on:click={toggleEdit}>Edit</button>
+		</h1>
+	{/if}
+{/if}
+
 <div class="container">
-	<div class="canvas-container">
-		<video id="video" hidden autoplay playsinline>
-			<track kind="captions" src="" label="Empty captions" />
-		</video>
-		<canvas id="canvas"></canvas>
-		{#if isPreviewActive}
-			<div
-				role="button"
-				tabindex="0"
-				class="capture-button"
-				on:click={captureFrame}
-				on:keydown={(e) => e.key === 'Enter' && captureFrame()}
-			>
-				<span class="gradient"></span>
-			</div>
-		{/if}
-	</div>
-	<div class="controls">
-		{#if !id}
-			<button on:click={captureFrame}>Capture Frame</button>
-			<button on:click={switchCamera}>Switch Camera</button>
-			<button on:click={togglePreview}>{isPreviewActive ? 'Stop Preview' : 'Start Preview'}</button>
-		{/if}
-		<button on:click={() => playAnimation(currentFrameIndex !== -1 ? currentFrameIndex : 0)}>
-			Play Animation
-		</button>
-		<button on:click={deleteCurrentFrame}>Delete Current Frame</button>
-		<select bind:value={filter}>
-			<option value="none">None</option>
-			<option value="grayscale">Grayscale</option>
-			<option value="sepia">Sepia</option>
-		</select>
-		<input type="text" bind:value={currentAnimationName} placeholder="Animation name" />
-		<button on:click={saveAnimation}>Save Animation</button>
-		<!-- Add this button -->
-		{#if id !== null}
-			<button on:click={deleteAnimation} class="delete-button">Delete Animation</button>
-		{/if}
+	<div class="preview-and-controls">
+		<div class="canvas-container">
+			<video id="video" hidden autoplay playsinline>
+				<track kind="captions" src="" label="Empty captions" />
+			</video>
+			<canvas id="canvas"></canvas>
+			{#if isPreviewActive}
+				<div
+					role="button"
+					tabindex="0"
+					class="capture-button"
+					on:click={captureFrame}
+					on:keydown={(e) => e.key === 'Enter' && captureFrame()}
+				>
+					<span class="gradient"></span>
+				</div>
+			{/if}
+		</div>
+
+		<div class="controls">
+			{#if id !== null}
+				<button on:click={captureFrame}>Add Frame</button>
+				<button on:click={switchCamera}>Switch Camera</button>
+				<button on:click={togglePreview}
+					>{isPreviewActive ? 'Stop Preview' : 'Start Preview'}</button
+				>
+			{/if}
+			<button on:click={() => playAnimation(currentFrameIndex !== -1 ? currentFrameIndex : 0)}>
+				Play Animation
+			</button>
+			<button on:click={deleteCurrentFrame}>Delete Current Frame</button>
+			<select bind:value={filter}>
+				<option value="none">None</option>
+				<option value="grayscale">Grayscale</option>
+				<option value="sepia">Sepia</option>
+			</select>
+			<input type="text" bind:value={currentAnimationName} placeholder="Animation name" />
+			<button on:click={saveAnimation}>Save Animation</button>
+			<!-- Add this button -->
+			{#if id !== null}
+				<button on:click={deleteAnimation} class="delete-button">Delete Animation</button>
+			{/if}
+		</div>
 	</div>
 	<div class="timeline">
 		{#each frames as frame, index}
@@ -434,6 +489,13 @@
 		padding: 1rem;
 		box-sizing: border-box;
 	}
+	@media (min-width: 600px) {
+		.preview-and-controls {
+			display: grid;
+			grid-template-columns: 1fr min-content;
+		}
+	}
+
 	.canvas-container {
 		width: 100%;
 		aspect-ratio: 4 / 3; /* Changed from 16 / 9 for a larger vertical space */
@@ -448,16 +510,27 @@
 	}
 	.controls {
 		display: flex;
-		flex-wrap: wrap;
+		flex-direction: column;
 		gap: 0.5rem;
-		position: sticky;
-		bottom: 1rem;
-		left: 0;
 	}
+	@media (min-width: 768px) {
+		.controls {
+			padding-left: 1rem;
+		}
+	}
+	button {
+		border-radius: 0.5rem;
+		background: papayawhip;
+	}
+
+	button:hover,
+	button:focus {
+		background: plum;
+	}
+
 	button,
 	select,
 	input {
-		flex-grow: 1;
 		min-width: 120px;
 		padding: 0.75rem 0.5rem;
 		font-size: 1rem;
@@ -499,9 +572,16 @@
 	}
 
 	.frame img {
-		width: 200px;
-		height: 150px;
+		width: 100px;
+		height: 70px;
 		object-fit: cover;
+	}
+
+	@media (min-width: 768px) {
+		.frame img {
+			width: 150px;
+			height: 100px;
+		}
 	}
 
 	.frame-number {
@@ -542,8 +622,8 @@
 		transform: translateY(-50%);
 		display: block;
 		min-width: none;
-		height: 100px;
-		width: 100px;
+		height: 40px;
+		width: 40px;
 		border-radius: 50%;
 		box-sizing: border-box;
 		overflow: hidden;
@@ -553,23 +633,19 @@
 		transition: background 0.5s ease; */
 	}
 
-	/* .capture-button:hover,
-	.capture-button:focus {
-		background: rgb(40, 40, 255);
-		background: radial-gradient(
-			circle,
-			rgba(40, 40, 255, 1) 9%,
-			rgba(40, 40, 255, 1) 46%,
-			rgba(2, 0, 36, 1) 100%
-		);
-	} */
+	@media (min-width: 768px) {
+		.capture-button {
+			width: 100px;
+			height: 100px;
+		}
+	}
 
 	.gradient {
 		position: relative;
 		display: block;
 		border-radius: 50%;
-		width: 100px;
-		height: 100px;
+		width: 100%;
+		height: 100%;
 		background-image: linear-gradient(to right, hsl(211, 100%, 50%), hsl(179, 100%, 30%));
 		z-index: 1;
 	}
@@ -588,5 +664,41 @@
 	}
 	.gradient:hover::before {
 		opacity: 1;
+	}
+
+	h1 {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		font-size: 2rem;
+		max-width: 1200px;
+		margin: auto;
+		padding: 0 1rem;
+		box-sizing: border-box;
+	}
+
+	:global(.dark h1) {
+		color: white;
+		margin: 0 1rem;
+	}
+
+	.edit-name {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 1rem;
+	}
+
+	.edit-name input {
+		font-size: 1.5rem;
+		padding: 0.5rem;
+	}
+
+	.edit-button {
+		font-size: 1rem;
+		padding: 0.25rem 0.5rem;
+		margin-left: 0.5rem;
+		vertical-align: middle;
 	}
 </style>
