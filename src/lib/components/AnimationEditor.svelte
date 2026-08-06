@@ -14,6 +14,17 @@
 		type Project
 	} from '$lib/db';
 	import { createObjectUrlCache } from '$lib/objectUrls';
+	import {
+		cameraErrorMessage,
+		describeStream,
+		listCameras,
+		loadPreferredDeviceId,
+		onDeviceChange,
+		openCamera,
+		savePreferredDeviceId,
+		stopStream,
+		type CameraDevice
+	} from '$lib/camera';
 
 	/** Project id, or a legacy name-based id from an older link. */
 	export let id: string | null = null;
@@ -21,7 +32,11 @@
 	let video: HTMLVideoElement;
 	let canvas: HTMLCanvasElement;
 	let context: CanvasRenderingContext2D | null;
-	let currentFacingMode: 'user' | 'environment' = 'user';
+	let stream: MediaStream | null = null;
+	let cameras: CameraDevice[] = [];
+	let selectedDeviceId: string | null = null;
+	let cameraError: string | null = null;
+	let aspectRatio = 4 / 3;
 	let project: Project | null = null;
 	let frames: Blob[] = [];
 	let fps: number = DEFAULT_FPS;
@@ -38,29 +53,70 @@
 	const urls = createObjectUrlCache();
 	$: urls.prune(frames);
 
-	// Function to start the camera
-	function startCamera(facingMode: 'user' | 'environment') {
-		navigator.mediaDevices
-			.getUserMedia({ video: { facingMode: facingMode } })
-			.then((stream) => {
-				if (video) {
-					video.srcObject = stream;
-					video.play();
-					video.onloadedmetadata = () => {
-						videoWidth = video.videoWidth;
-						videoHeight = video.videoHeight;
-						if (canvas) {
-							canvas.width = videoWidth;
-							canvas.height = videoHeight;
-						}
-					};
-					drawPreview();
+	async function startCamera(deviceId: string | null = selectedDeviceId) {
+		stopStream(stream); // Never hold two streams: the old device stays lit otherwise.
+		stream = null;
+		cameraError = null;
+
+		try {
+			stream = await openCamera(deviceId);
+		} catch (error) {
+			console.error('Error accessing camera: ', error);
+			cameraError = cameraErrorMessage(error);
+			return;
+		}
+
+		// openCamera may have fallen back to a different device than requested.
+		const info = describeStream(stream);
+		selectedDeviceId = info.deviceId;
+		savePreferredDeviceId(info.deviceId);
+
+		if (info.width && info.height) {
+			aspectRatio = info.width / info.height;
+			videoWidth = info.width;
+			videoHeight = info.height;
+			if (canvas) {
+				canvas.width = info.width;
+				canvas.height = info.height;
+			}
+		}
+
+		if (video) {
+			video.srcObject = stream;
+			video.play().catch(() => {}); // Autoplay rejection is not fatal; the frame loop still draws.
+			video.onloadedmetadata = () => {
+				videoWidth = video.videoWidth;
+				videoHeight = video.videoHeight;
+				if (videoWidth && videoHeight) {
+					aspectRatio = videoWidth / videoHeight;
+					if (canvas) {
+						canvas.width = videoWidth;
+						canvas.height = videoHeight;
+					}
 				}
-			})
-			.catch((err) => {
-				console.error('Error accessing camera: ', err);
-				alert("can't start camera");
-			});
+			};
+			drawPreview();
+		}
+
+		// Labels only populate once permission has been granted.
+		cameras = await listCameras();
+	}
+
+	async function refreshCameras() {
+		cameras = await listCameras();
+		if (!cameras.length) {
+			cameraError = 'No cameras found. Plug one in and press Refresh.';
+			return;
+		}
+		// The remembered camera may have been unplugged while we were running.
+		if (selectedDeviceId && !cameras.some((c) => c.deviceId === selectedDeviceId)) {
+			await startCamera(null);
+		}
+	}
+
+	function handleCameraChange() {
+		// bind:value has already written the picked device into selectedDeviceId.
+		startCamera(selectedDeviceId);
 	}
 
 	function drawPreview() {
@@ -163,12 +219,6 @@
 		}
 	}
 
-	// Function to switch camera
-	function switchCamera() {
-		currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
-		startCamera(currentFacingMode);
-	}
-
 	// Function to save animation
 	async function saveAnimation() {
 		const name = currentAnimationName.trim();
@@ -192,18 +242,25 @@
 		}
 	}
 
+	let unsubscribeDeviceChange: (() => void) | null = null;
+
 	onMount(() => {
 		context = canvas.getContext('2d');
-		if (!id) {
-			startCamera(currentFacingMode);
-			drawPreview();
+		selectedDeviceId = loadPreferredDeviceId();
+
+		if (id) {
+			loadProject(id);
+		} else {
+			startCamera(selectedDeviceId);
 		}
 
-		if (id) loadProject(id);
+		unsubscribeDeviceChange = onDeviceChange(refreshCameras);
 	});
 
 	onDestroy(() => {
 		if (previewRequestId) cancelAnimationFrame(previewRequestId);
+		unsubscribeDeviceChange?.();
+		stopStream(stream);
 		urls.revokeAll();
 	});
 
@@ -273,8 +330,7 @@
 	function addNewFrame() {
 		isPreviewActive = true;
 		currentFrameIndex = -1;
-		startCamera(currentFacingMode);
-		drawPreview();
+		startCamera(selectedDeviceId);
 	}
 
 	function toggleEdit() {
@@ -319,8 +375,11 @@
 {/if}
 
 <div class="container">
+	{#if cameraError}
+		<p class="camera-error" role="alert">{cameraError}</p>
+	{/if}
 	<div class="preview-and-controls">
-		<div class="canvas-container">
+		<div class="canvas-container" style="aspect-ratio: {aspectRatio}">
 			<video bind:this={video} hidden autoplay playsinline>
 				<track kind="captions" src="" label="Empty captions" />
 			</video>
@@ -340,7 +399,18 @@
 
 		<div class="controls">
 			<button on:click={captureFrame}>Add Frame</button>
-			<button on:click={switchCamera}>Switch Camera</button>
+			<div class="camera-picker">
+				<label for="camera-select">Camera</label>
+				<select id="camera-select" bind:value={selectedDeviceId} on:change={handleCameraChange}>
+					{#if cameras.length === 0}
+						<option value="">Default camera</option>
+					{/if}
+					{#each cameras as camera (camera.deviceId)}
+						<option value={camera.deviceId}>{camera.label}</option>
+					{/each}
+				</select>
+				<button on:click={refreshCameras}>Refresh</button>
+			</div>
 			<button on:click={togglePreview}>
 				{isPreviewActive ? 'Stop Preview' : 'Start Preview'}
 			</button>
@@ -414,6 +484,35 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;
+	}
+
+	.camera-picker {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.camera-picker label {
+		font-size: 0.8rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: #666;
+	}
+
+	:global(.dark) .camera-picker label {
+		color: #bbb;
+	}
+
+	.camera-picker select {
+		max-width: 100%;
+	}
+
+	.camera-error {
+		margin: 0 0 1rem;
+		padding: 0.75rem;
+		border-radius: 0.5rem;
+		background: #fdecea;
+		color: #b00020;
 	}
 	@media (min-width: 768px) {
 		.controls {
