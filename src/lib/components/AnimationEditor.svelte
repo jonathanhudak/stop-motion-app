@@ -26,6 +26,16 @@
 		type CameraDevice
 	} from '$lib/camera';
 	import { clampFps, createPlayer, FPS_PRESETS, MAX_FPS, MIN_FPS } from '$lib/playback';
+	import {
+		canShareFile,
+		downloadBlob,
+		exportFilename,
+		exportGif,
+		exportVideo,
+		shareFile,
+		toFile,
+		videoExportSupported
+	} from '$lib/export';
 
 	/** Project id, or a legacy name-based id from an older link. */
 	export let id: string | null = null;
@@ -51,6 +61,14 @@
 	let isPlaying = false;
 	let loopPlayback = true;
 	let editedName = '';
+
+	let exportStatus: string | null = null;
+	let exportError: string | null = null;
+	let exportNotice: string | null = null;
+	/** Held after encoding so Share can run from its own click. */
+	let exportedFile: File | null = null;
+	const canExportVideo = typeof window !== 'undefined' && videoExportSupported();
+	$: canShareExport = exportedFile !== null && canShareFile(exportedFile);
 
 	let onionEnabled = true;
 	let onionOpacity = 0.35;
@@ -259,6 +277,67 @@
 
 	function stopPlayback() {
 		player.stop();
+	}
+
+	async function runExport(kind: 'video' | 'gif') {
+		if (frames.length === 0 || exportStatus) return;
+
+		player.stop();
+		const label = kind === 'gif' ? 'GIF' : 'video';
+		exportStatus = `Encoding ${label}… 0/${frames.length}`;
+		exportError = null;
+		exportNotice = null;
+		exportedFile = null;
+
+		try {
+			const onProgress = (done: number, total: number) => {
+				exportStatus = `Encoding ${label}… ${done}/${total}`;
+			};
+			const { blob, extension } =
+				kind === 'gif'
+					? await exportGif(frames, fps, onProgress)
+					: await exportVideo(frames, fps, onProgress);
+
+			const filename = exportFilename(currentAnimationName || 'animation', extension);
+			const file = toFile(blob, filename);
+			exportStatus = null;
+			exportedFile = file;
+
+			if (canShareFile(file)) {
+				// Share needs a fresh gesture, so offer the button instead of firing it.
+				exportNotice = `${filename} is ready to share or save.`;
+			} else {
+				downloadBlob(blob, filename);
+				exportNotice = `Saved ${filename}.`;
+			}
+		} catch (error) {
+			console.error(`Error exporting ${label}:`, error);
+			exportStatus = null;
+			exportError = error instanceof Error ? error.message : `Could not export the ${label}.`;
+		}
+	}
+
+	async function shareExport() {
+		if (!exportedFile) return;
+
+		try {
+			const result = await shareFile(exportedFile, currentAnimationName || 'Stop motion');
+			if (result === 'unsupported') {
+				downloadBlob(exportedFile, exportedFile.name);
+				exportNotice = `Sharing is not available here, so ${exportedFile.name} was saved instead.`;
+			} else if (result === 'shared') {
+				exportNotice = `Shared ${exportedFile.name}.`;
+			}
+		} catch (error) {
+			console.error('Error sharing export:', error);
+			exportError = 'Could not open the share sheet. Save the file instead.';
+		}
+	}
+
+	function downloadExport() {
+		if (!exportedFile) return;
+		downloadBlob(exportedFile, exportedFile.name);
+		exportNotice = `Saved ${exportedFile.name}.`;
 	}
 
 	function stepFrame(delta: number) {
@@ -480,6 +559,9 @@
 	{#if cameraError}
 		<p class="camera-error" role="alert">{cameraError}</p>
 	{/if}
+	{#if exportError}
+		<p class="camera-error" role="alert">{exportError}</p>
+	{/if}
 	<div class="preview-and-controls">
 		<div class="canvas-container" style="aspect-ratio: {aspectRatio}">
 			<video bind:this={video} hidden autoplay playsinline>
@@ -572,6 +654,40 @@
 				<option value="grayscale">Grayscale</option>
 				<option value="sepia">Sepia</option>
 			</select>
+			<div class="export">
+				<span class="group-label">Export</span>
+				<div class="export-buttons">
+					{#if canExportVideo}
+						<button
+							disabled={frames.length === 0 || exportStatus !== null}
+							on:click={() => runExport('video')}
+						>
+							Video
+						</button>
+					{/if}
+					<button
+						disabled={frames.length === 0 || exportStatus !== null}
+						on:click={() => runExport('gif')}
+					>
+						GIF
+					</button>
+				</div>
+				{#if exportStatus}
+					<span class="export-status" role="status">{exportStatus}</span>
+				{/if}
+				{#if exportedFile}
+					<div class="export-buttons">
+						{#if canShareExport}
+							<button class="share" on:click={shareExport}>Share</button>
+						{/if}
+						<button on:click={downloadExport}>Save file</button>
+					</div>
+				{/if}
+				{#if exportNotice}
+					<span class="export-status" role="status">{exportNotice}</span>
+				{/if}
+			</div>
+
 			<input type="text" bind:value={currentAnimationName} placeholder="Animation name" />
 			<button on:click={saveAnimation}>Save Animation</button>
 			<button on:click={newAnimation}>New Animation</button>
@@ -643,14 +759,46 @@
 		gap: 0.25rem;
 	}
 
-	.camera-picker label {
+	.camera-picker label,
+	.group-label {
 		font-size: 0.8rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: #666;
 	}
 
-	:global(.dark) .camera-picker label {
+	:global(.dark) .camera-picker label,
+	:global(.dark) .group-label {
+		color: #bbb;
+	}
+
+	.export {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.export-buttons {
+		display: flex;
+		gap: 0.25rem;
+	}
+
+	.export-buttons button {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.export-status {
+		font-size: 0.8rem;
+		color: #666;
+	}
+
+	.share {
+		background: hsl(150, 60%, 75%);
+		font-weight: 600;
+	}
+
+	:global(.dark) .export-status {
 		color: #bbb;
 	}
 
