@@ -25,6 +25,7 @@
 		stopStream,
 		type CameraDevice
 	} from '$lib/camera';
+	import { clampFps, createPlayer, FPS_PRESETS, MAX_FPS, MIN_FPS } from '$lib/playback';
 
 	/** Project id, or a legacy name-based id from an older link. */
 	export let id: string | null = null;
@@ -48,10 +49,13 @@
 	let currentFrameIndex: number = -1;
 	let isEditing = false;
 	let isPlaying = false;
+	let loopPlayback = true;
 	let editedName = '';
 
 	const urls = createObjectUrlCache();
 	$: urls.prune(frames);
+
+	const player = createPlayer();
 
 	async function startCamera(deviceId: string | null = selectedDeviceId) {
 		stopStream(stream); // Never hold two streams: the old device stays lit otherwise.
@@ -188,9 +192,8 @@
 		});
 	}
 
-	// Function to play animation
 	async function playAnimation(startIndex: number = 0) {
-		if (isPlaying) return; // A second loop would fight the first over the canvas
+		if (frames.length === 0) return;
 
 		if (isPreviewActive) {
 			isPreviewActive = false;
@@ -199,23 +202,35 @@
 			}
 		}
 
-		if (frames.length === 0) {
-			console.log('No frames to play');
-			return;
-		}
-
 		isPlaying = true;
-		const frameDelay = 1000 / (fps || DEFAULT_FPS);
-
-		try {
-			for (let i = startIndex; i < frames.length; i++) {
-				currentFrameIndex = i;
-				await drawFrame(frames[i]);
-				await new Promise((resolve) => setTimeout(resolve, frameDelay));
+		await player.play({
+			frameCount: frames.length,
+			fps,
+			loop: loopPlayback,
+			startIndex,
+			onFrame: async (index) => {
+				currentFrameIndex = index;
+				await drawFrame(frames[index]);
+			},
+			// A restart (fps change) begins before the old loop unwinds, so trust
+			// the player rather than blindly clearing the flag.
+			onEnd: () => {
+				isPlaying = player.playing;
 			}
-		} finally {
-			isPlaying = false;
-			currentFrameIndex = -1;
+		});
+	}
+
+	function stopPlayback() {
+		player.stop();
+	}
+
+	function setFps(next: number) {
+		fps = clampFps(next);
+		// Restart so the change is audible immediately rather than after the loop ends.
+		if (isPlaying) {
+			const resumeAt = currentFrameIndex === -1 ? 0 : currentFrameIndex;
+			player.stop();
+			playAnimation(resumeAt);
 		}
 	}
 
@@ -258,6 +273,7 @@
 	});
 
 	onDestroy(() => {
+		player.stop();
 		if (previewRequestId) cancelAnimationFrame(previewRequestId);
 		unsubscribeDeviceChange?.();
 		stopStream(stream);
@@ -414,12 +430,40 @@
 			<button on:click={togglePreview}>
 				{isPreviewActive ? 'Stop Preview' : 'Start Preview'}
 			</button>
-			<button
-				disabled={isPlaying}
-				on:click={() => playAnimation(currentFrameIndex !== -1 ? currentFrameIndex : 0)}
-			>
-				Play Animation
-			</button>
+			{#if isPlaying}
+				<button on:click={stopPlayback}>Stop Playback</button>
+			{:else}
+				<button
+					disabled={frames.length === 0}
+					on:click={() => playAnimation(currentFrameIndex !== -1 ? currentFrameIndex : 0)}
+				>
+					Play Animation
+				</button>
+			{/if}
+
+			<div class="fps">
+				<label for="fps-slider">Frame rate: {fps} fps</label>
+				<input
+					id="fps-slider"
+					type="range"
+					min={MIN_FPS}
+					max={MAX_FPS}
+					step="1"
+					value={fps}
+					on:input={(e) => setFps(Number(e.currentTarget.value))}
+				/>
+				<div class="fps-presets">
+					{#each FPS_PRESETS as preset (preset)}
+						<button class="preset" class:active={fps === preset} on:click={() => setFps(preset)}>
+							{preset}
+						</button>
+					{/each}
+				</div>
+				<label class="checkbox">
+					<input type="checkbox" bind:checked={loopPlayback} />
+					Loop
+				</label>
+			</div>
 			<button on:click={deleteCurrentFrame}>Delete Current Frame</button>
 			<select bind:value={filter}>
 				<option value="none">None</option>
@@ -505,6 +549,63 @@
 
 	.camera-picker select {
 		max-width: 100%;
+	}
+
+	.fps {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+
+	.fps > label {
+		font-size: 0.8rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: #666;
+	}
+
+	:global(.dark) .fps > label {
+		color: #bbb;
+	}
+
+	.fps input[type='range'] {
+		min-width: 0;
+		width: 100%;
+		padding: 0;
+	}
+
+	.fps-presets {
+		display: flex;
+		gap: 0.25rem;
+	}
+
+	.preset {
+		flex: 1;
+		min-width: 0;
+		padding: 0.4rem 0;
+		font-size: 0.9rem;
+	}
+
+	.preset.active {
+		background: plum;
+		font-weight: 600;
+	}
+
+	.checkbox {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.9rem;
+	}
+
+	.checkbox input {
+		min-width: 0;
+		width: auto;
+		padding: 0;
+	}
+
+	:global(.dark) .checkbox {
+		color: #eee;
 	}
 
 	.camera-error {
