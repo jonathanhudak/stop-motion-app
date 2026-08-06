@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { base } from '$app/paths';
 
 	export let id: string | null = null;
 
@@ -336,7 +337,7 @@
 			request.onsuccess = (event) => {
 				console.log('Animation deleted successfully');
 				alert('Animation deleted successfully!');
-				goto('/'); // Navigate to the root route
+				goto(`${base}/`); // Navigate to the root route
 			};
 		} catch (error) {
 			console.error('Error in deleteAnimation:', error);

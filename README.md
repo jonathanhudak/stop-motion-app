@@ -35,4 +35,24 @@ npm run build
 
 You can preview the production build with `npm run preview`.
 
-> To deploy your app, you may need to install an [adapter](https://kit.svelte.dev/docs/adapters) for your target environment.
+## Deploying
+
+The app is a fully static SvelteKit build (`@sveltejs/adapter-static`) hosted on GitHub Pages at
+https://jonathanhudak.github.io/stop-motion-app/.
+
+Every push to `main` runs `.github/workflows/deploy.yml`, which builds with
+`BASE_PATH=/stop-motion-app` and uploads `build/` to Pages. Because the site lives under a
+subpath, use `base` from `$app/paths` for every internal link:
+
+```svelte
+<a href="{base}/animations/">My Animations</a>
+```
+
+To reproduce the deployed build locally:
+
+```bash
+BASE_PATH=/stop-motion-app npm run build
+```
+
+Routes with runtime-only params (`/animations/[animationId]`) are not prerendered; GitHub Pages
+serves `404.html`, which boots the client router and resolves them.

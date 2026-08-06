@@ -1,5 +1,6 @@
 <script>
 	import { page } from '$app/stores';
+	import { base } from '$app/paths';
 	import { onMount } from 'svelte';
 
 	let darkMode = false;
@@ -24,8 +25,12 @@
 
 <div>
 	<nav>
-		<a href="/" class:active={$page.url.pathname === '/'}>Animator</a>
-		<a href="/animations" class:active={$page.url.pathname === '/animations'}>My Animations</a>
+		<a href="{base}/" class:active={$page.url.pathname === base || $page.url.pathname === `${base}/`}
+			>Animator</a
+		>
+		<a href="{base}/animations/" class:active={$page.url.pathname === `${base}/animations/`}
+			>My Animations</a
+		>
 		<button on:click={toggleDarkMode}>
 			{darkMode ? '☀️' : '🌙'}
 		</button>

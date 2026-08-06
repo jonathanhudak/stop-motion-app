@@ -32,8 +32,5 @@
 		"vite": "^5.0.3",
 		"vite-plugin-mkcert": "^1.17.6"
 	},
-	"type": "module",
-	"dependencies": {
-		"@sveltejs/adapter-vercel": "^5.4.4"
-	}
+	"type": "module"
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { base } from '$app/paths';
 
 	let animations: { name: string; frames: string[] }[] = [];
 
@@ -26,7 +27,7 @@
 <div class="container">
 	{#each animations as animation}
 		<div class="tile">
-			<a href={`/animations/${animation.name}`}>
+			<a href={`${base}/animations/${animation.name}/`}>
 				<img class="thumbnail" src={animation.frames[0]} alt={animation.name} />
 				<h3>{animation.name}</h3>
 			</a>
