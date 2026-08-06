@@ -52,8 +52,27 @@
 	let loopPlayback = true;
 	let editedName = '';
 
+	let onionEnabled = true;
+	let onionOpacity = 0.35;
+	let onionImage: HTMLImageElement | null = null;
+
 	const urls = createObjectUrlCache();
 	$: urls.prune(frames);
+
+	// Keep the ghost pointed at the most recent frame.
+	$: loadOnionImage(frames[frames.length - 1]);
+
+	function loadOnionImage(frame: Blob | undefined) {
+		if (!frame) {
+			onionImage = null;
+			return;
+		}
+		const img = new Image();
+		img.onload = () => {
+			onionImage = img;
+		};
+		img.src = urls.get(frame);
+	}
 
 	const player = createPlayer();
 
@@ -123,31 +142,47 @@
 		startCamera(selectedDeviceId);
 	}
 
+	function canvasFilter(): string {
+		return filter === 'none' ? 'none' : `${filter}(100%)`;
+	}
+
 	function drawPreview() {
 		if (isPreviewActive && context && video) {
+			context.globalAlpha = 1;
+			context.filter = canvasFilter();
 			context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+			// Onion skin: the frame you shot last, ghosted over the live view, so
+			// you can line up the next move instead of eyeballing it.
+			if (onionEnabled && onionImage) {
+				context.globalAlpha = onionOpacity;
+				context.drawImage(onionImage, 0, 0, canvas.width, canvas.height);
+				context.globalAlpha = 1;
+			}
+
 			previewRequestId = requestAnimationFrame(drawPreview);
 		}
 	}
 
-	// Function to apply selected filter
-	function applyFilter() {
-		if (context) {
-			context.filter = filter === 'none' ? 'none' : filter + '(100%)';
-			context.drawImage(video, 0, 0, canvas.width, canvas.height);
-		}
-	}
-
-	// Function to capture frame
+	/** The ghost is only ever drawn on screen, never into a captured frame. */
 	async function captureFrame() {
+		if (!video || !canvas.width) return;
+
 		try {
-			const frame = await canvasToBlob(canvas);
+			const shot = document.createElement('canvas');
+			shot.width = canvas.width;
+			shot.height = canvas.height;
+			const shotContext = shot.getContext('2d');
+			if (!shotContext) throw new Error('Could not get a canvas context');
+			shotContext.filter = canvasFilter();
+			shotContext.drawImage(video, 0, 0, shot.width, shot.height);
+
+			const frame = await canvasToBlob(shot);
 			frames = [...frames, frame];
 			currentFrameIndex = -1;
-			applyFilter();
 		} catch (error) {
 			console.error('Error capturing frame:', error);
-			alert('Could not capture that frame. Please try again.');
+			cameraError = 'Could not capture that frame. Please try again.';
 		}
 	}
 
@@ -177,6 +212,8 @@
 			const img = new Image();
 			img.onload = () => {
 				if (context) {
+					context.globalAlpha = 1;
+					context.filter = 'none'; // Saved frames already have their filter baked in.
 					// With no live camera to size it, the canvas takes the frame's dimensions.
 					if (!isPreviewActive && (canvas.width !== img.width || canvas.height !== img.height)) {
 						canvas.width = img.width;
@@ -222,6 +259,53 @@
 
 	function stopPlayback() {
 		player.stop();
+	}
+
+	function stepFrame(delta: number) {
+		if (frames.length === 0) return;
+		const from = currentFrameIndex === -1 ? frames.length : currentFrameIndex;
+		const next = Math.min(frames.length - 1, Math.max(0, from + delta));
+		selectFrame(next);
+	}
+
+	/** Shooting needs both hands on the puppet, so the useful actions get keys. */
+	function handleKeydown(event: KeyboardEvent) {
+		if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+		// Never steal keys from a text field or the name editor.
+		const target = event.target as HTMLElement | null;
+		const tag = target?.tagName;
+		if (isEditing || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+		switch (event.key) {
+			case ' ':
+				event.preventDefault(); // Space would scroll, or re-trigger a focused button.
+				if (isPreviewActive) captureFrame();
+				else togglePreview();
+				break;
+			case 'ArrowLeft':
+				event.preventDefault();
+				stepFrame(-1);
+				break;
+			case 'ArrowRight':
+				event.preventDefault();
+				stepFrame(1);
+				break;
+			case 'Delete':
+			case 'Backspace':
+				event.preventDefault();
+				deleteCurrentFrame();
+				break;
+			case 'p':
+			case 'P':
+				if (isPlaying) stopPlayback();
+				else playAnimation(currentFrameIndex === -1 ? 0 : currentFrameIndex);
+				break;
+			case 'o':
+			case 'O':
+				onionEnabled = !onionEnabled;
+				break;
+		}
 	}
 
 	function setFps(next: number) {
@@ -375,6 +459,8 @@
 	}
 </script>
 
+<svelte:window on:keydown={handleKeydown} />
+
 {#if id !== null}
 	{#if isEditing}
 		<div class="edit-name">
@@ -441,6 +527,22 @@
 				</button>
 			{/if}
 
+			<div class="onion">
+				<label class="checkbox">
+					<input type="checkbox" bind:checked={onionEnabled} />
+					Onion skin
+				</label>
+				<input
+					aria-label="Onion skin opacity"
+					type="range"
+					min="0.1"
+					max="0.9"
+					step="0.05"
+					disabled={!onionEnabled}
+					bind:value={onionOpacity}
+				/>
+			</div>
+
 			<div class="fps">
 				<label for="fps-slider">Frame rate: {fps} fps</label>
 				<input
@@ -478,6 +580,11 @@
 			{/if}
 		</div>
 	</div>
+	<p class="shortcuts">
+		<kbd>Space</kbd> capture · <kbd>←</kbd><kbd>→</kbd> step frames ·
+		<kbd>Delete</kbd> remove frame · <kbd>P</kbd> play/stop · <kbd>O</kbd> onion skin
+	</p>
+
 	<div class="timeline">
 		{#each frames as frame, index (frame)}
 			<button
@@ -551,10 +658,37 @@
 		max-width: 100%;
 	}
 
+	.onion,
 	.fps {
 		display: flex;
 		flex-direction: column;
 		gap: 0.35rem;
+	}
+
+	.onion input[type='range'] {
+		min-width: 0;
+		width: 100%;
+		padding: 0;
+	}
+
+	.shortcuts {
+		margin: 0.5rem 0 0;
+		font-size: 0.8rem;
+		color: #666;
+	}
+
+	:global(.dark) .shortcuts {
+		color: #bbb;
+	}
+
+	kbd {
+		display: inline-block;
+		padding: 0.1rem 0.35rem;
+		border: 1px solid #ccc;
+		border-bottom-width: 2px;
+		border-radius: 0.25rem;
+		font-family: inherit;
+		font-size: 0.75rem;
 	}
 
 	.fps > label {
