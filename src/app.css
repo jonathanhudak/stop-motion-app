@@ -1,0 +1,161 @@
+/*
+ * Design tokens and control defaults.
+ *
+ * Every colour goes through a variable so the dark theme is one override block
+ * instead of a per-component afterthought. `.dark` on <html> is the switch.
+ */
+
+:root {
+	--bg: #f7f6f4;
+	--surface: #ffffff;
+	--surface-sunken: #eeece8;
+	--text: #1a1a1a;
+	--text-muted: #5f5f5f;
+	--border: #d9d5cf;
+	--accent: #2f6df6;
+	--accent-text: #ffffff;
+	--accent-soft: #e5edff;
+	--success: #1f8a4c;
+	--danger: #b00020;
+	--danger-soft: #fdecea;
+	--focus: #2f6df6;
+	--radius: 0.6rem;
+	--radius-sm: 0.35rem;
+	--shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.06);
+	color-scheme: light;
+}
+
+:root.dark {
+	--bg: #121212;
+	--surface: #1d1d1f;
+	--surface-sunken: #141416;
+	--text: #f2f2f2;
+	--text-muted: #a5a5a5;
+	--border: #34343a;
+	--accent: #6d9bff;
+	--accent-text: #10131a;
+	--accent-soft: #23304d;
+	--success: #56d68a;
+	--danger: #ff7a7a;
+	--danger-soft: #3a1d1f;
+	--focus: #8fb3ff;
+	--shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 14px rgba(0, 0, 0, 0.4);
+	color-scheme: dark;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+	min-height: 100%;
+	background: var(--bg);
+	color: var(--text);
+	font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+	transition:
+		background-color 0.2s,
+		color 0.2s;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+button,
+select,
+input,
+textarea {
+	font: inherit;
+	color: var(--text);
+}
+
+/* Shared control look, so components only style what makes them different. */
+button {
+	padding: 0.6rem 0.9rem;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--surface);
+	color: var(--text);
+	cursor: pointer;
+	touch-action: manipulation;
+	user-select: none;
+	-webkit-user-select: none;
+	transition:
+		background-color 0.15s,
+		border-color 0.15s,
+		transform 0.05s;
+}
+
+button:hover:not(:disabled) {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+}
+
+button:active:not(:disabled) {
+	transform: translateY(1px);
+}
+
+button:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
+/* Primary action: capture, and the one save that matters. */
+button.primary {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: var(--accent-text);
+	font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+	background: var(--accent);
+	filter: brightness(1.08);
+}
+
+button.danger {
+	color: var(--danger);
+	border-color: var(--border);
+}
+
+button.danger:hover:not(:disabled) {
+	background: var(--danger-soft);
+	border-color: var(--danger);
+}
+
+select,
+input[type='text'] {
+	padding: 0.55rem 0.6rem;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--surface);
+	max-width: 100%;
+}
+
+input[type='range'] {
+	width: 100%;
+	accent-color: var(--accent);
+}
+
+input[type='checkbox'] {
+	accent-color: var(--accent);
+	width: 1.05rem;
+	height: 1.05rem;
+}
+
+:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
+}
+
+kbd {
+	display: inline-block;
+	padding: 0.1rem 0.35rem;
+	border: 1px solid var(--border);
+	border-bottom-width: 2px;
+	border-radius: var(--radius-sm);
+	background: var(--surface);
+	font-family: inherit;
+	font-size: 0.75rem;
+}

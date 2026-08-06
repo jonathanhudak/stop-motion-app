@@ -1,13 +1,24 @@
 <script lang="ts">
-	import { page } from '$app/stores';
 	import AnimationEditor from '$lib/components/AnimationEditor.svelte';
 
-	$: animationId = $page.params.animationId;
-	$: console.log('Animation ID:', animationId);
+	// SvelteKit passes params to the page component; taking it as a prop avoids the
+	// "unknown prop" warning the previous $page-based version produced.
+	export let params: { animationId?: string } = {};
+
+	$: animationId = params.animationId ?? null;
 </script>
 
 {#if animationId}
 	<AnimationEditor id={animationId} />
 {:else}
-	<p>Loading animation...</p>
+	<p class="loading">Loading animation…</p>
 {/if}
+
+<style>
+	.loading {
+		max-width: 1200px;
+		margin: 0 auto;
+		padding: 1rem;
+		color: var(--text-muted);
+	}
+</style>

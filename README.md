@@ -1,51 +1,76 @@
-# create-svelte
+# stop-motion-app
 
-Everything you need to build a Svelte project, powered by [`create-svelte`](https://github.com/sveltejs/kit/tree/main/packages/create-svelte).
+A browser stop-motion animator: shoot frames from any camera, scrub the timeline, play back at a
+real frame rate, and export a video or GIF. Everything stays on the device — frames live in
+IndexedDB and nothing is uploaded.
 
-## Creating a project
+Live at https://jonathanhudak.github.io/stop-motion-app/
 
-If you're seeing this, you've probably already done this step. Congrats!
+## Shooting
 
-```bash
-# create a new project in the current directory
-npm create svelte@latest
-
-# create a new project in my-app
-npm create svelte@latest my-app
-```
+- **Camera** — any `videoinput` device: built-in cameras, USB webcams, HDMI capture cards. The
+  choice is remembered, and hot-plugs are picked up. A DSLR only appears if it exposes a UVC
+  webcam mode or vendor software publishes a virtual camera; otherwise use a capture card.
+- **Onion skin** — the previous frame ghosted over the live view at adjustable opacity, so you can
+  line up the next move. It is drawn on screen only, never into a captured frame.
+- **Keyboard** — <kbd>Space</kbd> capture, <kbd>←</kbd>/<kbd>→</kbd> step frames,
+  <kbd>Delete</kbd> remove the selected frame, <kbd>P</kbd> play/stop, <kbd>O</kbd> toggle onion
+  skin. Deleting a frame offers an Undo in the toast.
+- **Frame rate** — 1–30 fps with 8/12/15/24 presets, stored per project. Changing it during
+  playback restarts at the new rate.
+- **Export** — WebM (MediaRecorder) or animated GIF (gifenc, capped at 800px wide). Where the OS
+  supports sharing files (Android Chrome, iOS Safari) a Share button hands it to the share sheet;
+  elsewhere it downloads.
 
 ## Developing
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
 ```bash
+npm install
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-## Building
+`npm run check` runs `svelte-check`; `npm run lint` runs Prettier and ESLint.
 
-To create a production version of your app:
+Note that `npm run check` regenerates `.svelte-kit`, which breaks an already-running `npm run dev`
+with `__SVELTEKIT_APP_VERSION__ is not defined`. Restart the dev server afterwards.
 
-```bash
-npm run build
+## Architecture
+
+The editor is a thin orchestrator over focused modules, all under `src/lib`:
+
+| Module          | Responsibility                                                  |
+| --------------- | --------------------------------------------------------------- |
+| `db.ts`         | IndexedDB projects: schema, migrations, CRUD                    |
+| `camera.ts`     | Device enumeration, stream lifecycle, remembered device         |
+| `playback.ts`   | Cancellable frame player scheduled against a deadline           |
+| `export.ts`     | WebM and GIF encoding, download, Web Share                      |
+| `objectUrls.ts` | Cached object URLs for frame Blobs, revoked when frames go away |
+| `toast.ts`      | Inline notifications (no `alert()` anywhere)                    |
+
+`src/app.css` holds the design tokens. Light and dark both come from one variable block, switched
+by a `.dark` class on `<html>`.
+
+### Storage
+
+Projects live in the `AnimationDB` database, store `projects`, keyed on a generated `id`:
+
+```ts
+{ id, name, frames: Blob[], fps, createdAt, updatedAt }
 ```
 
-You can preview the production build with `npm run preview`.
+Schema v1 keyed records on `name` and stored frames as PNG data URLs. v2 migrates those in the
+`versionchange` transaction: data URLs decode to Blobs, and `name` becomes a non-unique index so
+renaming is a single `put`. Links that used a name in the URL still resolve through
+`getProjectByName`.
 
 ## Deploying
 
-The app is a fully static SvelteKit build (`@sveltejs/adapter-static`) hosted on GitHub Pages at
-https://jonathanhudak.github.io/stop-motion-app/.
-
-Every push to `main` runs `.github/workflows/deploy.yml`, which builds with
-`BASE_PATH=/stop-motion-app` and uploads `build/` to Pages. Because the site lives under a
-subpath, use `base` from `$app/paths` for every internal link:
+Static build (`@sveltejs/adapter-static`) on GitHub Pages. Every push to `main` runs
+`.github/workflows/deploy.yml`, which builds with `BASE_PATH=/stop-motion-app` and uploads
+`build/`. Because the site lives under a subpath, internal links must go through `base`:
 
 ```svelte
-<a href="{base}/animations/">My Animations</a>
+<a href="{base}/animations/">My animations</a>
 ```
 
 To reproduce the deployed build locally:
