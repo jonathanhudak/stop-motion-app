@@ -1,39 +1,52 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { base } from '$app/paths';
+	import { listProjects, type Project } from '$lib/db';
+	import { createObjectUrlCache } from '$lib/objectUrls';
 
-	let animations: { name: string; frames: string[] }[] = [];
+	let projects: Project[] = [];
+	let error: string | null = null;
+	const urls = createObjectUrlCache();
 
-	// Function to load animations from IndexedDB
-	function loadAnimations() {
-		const request = indexedDB.open('AnimationDB', 1);
-		request.onsuccess = (event) => {
-			const db = (event.target as IDBOpenDBRequest).result;
-			const transaction = db.transaction(['animations'], 'readonly');
-			const objectStore = transaction.objectStore('animations');
-			const request = objectStore.getAll();
-
-			request.onsuccess = (event) => {
-				animations = (event.target as IDBRequest).result;
-			};
-		};
-	}
-
-	onMount(() => {
-		loadAnimations();
+	onMount(async () => {
+		try {
+			projects = await listProjects();
+			urls.prune(projects.flatMap((p) => p.frames.slice(0, 1)));
+		} catch (e) {
+			error = e instanceof Error ? e.message : String(e);
+		}
 	});
+
+	onDestroy(() => urls.revokeAll());
+
+	function frameCount(project: Project) {
+		return `${project.frames.length} frame${project.frames.length === 1 ? '' : 's'}`;
+	}
 </script>
 
+{#if error}
+	<p class="error">{error}</p>
+{/if}
+
 <div class="container">
-	{#each animations as animation}
+	{#each projects as project (project.id)}
 		<div class="tile">
-			<a href={`${base}/animations/${animation.name}/`}>
-				<img class="thumbnail" src={animation.frames[0]} alt={animation.name} />
-				<h3>{animation.name}</h3>
+			<a href={`${base}/animations/${project.id}/`}>
+				{#if project.frames.length > 0}
+					<img class="thumbnail" src={urls.get(project.frames[0])} alt={project.name} />
+				{:else}
+					<div class="thumbnail empty">No frames</div>
+				{/if}
+				<h3>{project.name}</h3>
 			</a>
+			<p class="meta">{frameCount(project)} · {project.fps} fps</p>
 		</div>
 	{/each}
 </div>
+
+{#if projects.length === 0 && !error}
+	<p class="empty-state">No animations yet. <a href="{base}/">Shoot one</a>.</p>
+{/if}
 
 <style>
 	.container {
@@ -52,10 +65,6 @@
 	}
 
 	:global(.dark .tile a) {
-		color: aqua;
-	}
-
-	:global(.dark .tile a) {
 		color: white;
 	}
 
@@ -63,5 +72,36 @@
 		width: 100%;
 		height: auto;
 		border-radius: 4px;
+	}
+
+	.thumbnail.empty {
+		aspect-ratio: 4 / 3;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: #eee;
+		color: #666;
+		font-size: 0.85rem;
+	}
+
+	.meta {
+		margin: 0;
+		font-size: 0.8rem;
+		color: #666;
+	}
+
+	.empty-state,
+	.error {
+		text-align: center;
+		padding: 1rem;
+	}
+
+	.error {
+		color: #b00020;
+	}
+
+	:global(.dark) .empty-state,
+	:global(.dark) .meta {
+		color: #bbb;
 	}
 </style>

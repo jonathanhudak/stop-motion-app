@@ -25,8 +25,9 @@
 
 <div>
 	<nav>
-		<a href="{base}/" class:active={$page.url.pathname === base || $page.url.pathname === `${base}/`}
-			>Animator</a
+		<a
+			href="{base}/"
+			class:active={$page.url.pathname === base || $page.url.pathname === `${base}/`}>Animator</a
 		>
 		<a href="{base}/animations/" class:active={$page.url.pathname === `${base}/animations/`}
 			>My Animations</a

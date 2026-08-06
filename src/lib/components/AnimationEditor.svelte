@@ -1,24 +1,42 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
+	import {
+		canvasToBlob,
+		createProject,
+		deleteProject,
+		getProject,
+		getProjectByName,
+		renameProject,
+		saveProject,
+		DEFAULT_FPS,
+		type Project
+	} from '$lib/db';
+	import { createObjectUrlCache } from '$lib/objectUrls';
 
+	/** Project id, or a legacy name-based id from an older link. */
 	export let id: string | null = null;
 
 	let video: HTMLVideoElement;
 	let canvas: HTMLCanvasElement;
 	let context: CanvasRenderingContext2D | null;
 	let currentFacingMode: 'user' | 'environment' = 'user';
-	let frames: string[] = [];
+	let project: Project | null = null;
+	let frames: Blob[] = [];
+	let fps: number = DEFAULT_FPS;
 	let isPreviewActive = !id; // Preview is inactive if an id is provided
 	let previewRequestId: number | null = null;
 	let videoWidth: number, videoHeight: number;
 	let filter: string = 'none';
 	let currentAnimationName: string = '';
-	let db: IDBDatabase | null = null;
 	let currentFrameIndex: number = -1;
 	let isEditing = false;
+	let isPlaying = false;
 	let editedName = '';
+
+	const urls = createObjectUrlCache();
+	$: urls.prune(frames);
 
 	// Function to start the camera
 	function startCamera(facingMode: 'user' | 'environment') {
@@ -61,16 +79,24 @@
 	}
 
 	// Function to capture frame
-	function captureFrame() {
-		const frame = canvas.toDataURL('image/png');
-		frames.push(frame);
-		frames = frames; // Trigger Svelte reactivity
-		applyFilter();
+	async function captureFrame() {
+		try {
+			const frame = await canvasToBlob(canvas);
+			frames = [...frames, frame];
+			currentFrameIndex = -1;
+			applyFilter();
+		} catch (error) {
+			console.error('Error capturing frame:', error);
+			alert('Could not capture that frame. Please try again.');
+		}
 	}
 
-	// Function to delete current frame
+	// Function to delete the selected frame, or the last one if none is selected
 	function deleteCurrentFrame() {
-		frames.pop();
+		if (frames.length === 0) return;
+		const target = currentFrameIndex === -1 ? frames.length - 1 : currentFrameIndex;
+		frames = frames.filter((_, index) => index !== target);
+		currentFrameIndex = -1;
 		context?.clearRect(0, 0, canvas.width, canvas.height);
 	}
 
@@ -86,8 +112,30 @@
 		}
 	}
 
+	function drawFrame(frame: Blob): Promise<void> {
+		return new Promise((resolve) => {
+			const img = new Image();
+			img.onload = () => {
+				if (context) {
+					// With no live camera to size it, the canvas takes the frame's dimensions.
+					if (!isPreviewActive && (canvas.width !== img.width || canvas.height !== img.height)) {
+						canvas.width = img.width;
+						canvas.height = img.height;
+					}
+					context.clearRect(0, 0, canvas.width, canvas.height);
+					context.drawImage(img, 0, 0, canvas.width, canvas.height);
+				}
+				resolve();
+			};
+			img.onerror = () => resolve();
+			img.src = urls.get(frame);
+		});
+	}
+
 	// Function to play animation
 	async function playAnimation(startIndex: number = 0) {
+		if (isPlaying) return; // A second loop would fight the first over the canvas
+
 		if (isPreviewActive) {
 			isPreviewActive = false;
 			if (previewRequestId) {
@@ -100,23 +148,19 @@
 			return;
 		}
 
-		for (let i = startIndex; i < frames.length; i++) {
-			currentFrameIndex = i;
-			await new Promise<void>((resolve) => {
-				const img = new Image();
-				img.onload = () => {
-					if (context) {
-						context.clearRect(0, 0, canvas.width, canvas.height);
-						context.drawImage(img, 0, 0, canvas.width, canvas.height);
-					}
-					setTimeout(resolve, 100); // Adjust frame rate here (100ms = 10fps)
-				};
-				img.src = frames[i];
-			});
-		}
+		isPlaying = true;
+		const frameDelay = 1000 / (fps || DEFAULT_FPS);
 
-		console.log('Animation playback completed');
-		currentFrameIndex = -1;
+		try {
+			for (let i = startIndex; i < frames.length; i++) {
+				currentFrameIndex = i;
+				await drawFrame(frames[i]);
+				await new Promise((resolve) => setTimeout(resolve, frameDelay));
+			}
+		} finally {
+			isPlaying = false;
+			currentFrameIndex = -1;
+		}
 	}
 
 	// Function to switch camera
@@ -126,7 +170,7 @@
 	}
 
 	// Function to save animation
-	function saveAnimation() {
+	async function saveAnimation() {
 		const name = currentAnimationName.trim();
 		if (!name) {
 			alert('Please enter a name for the animation.');
@@ -136,235 +180,99 @@
 			alert('Please capture at least one frame.');
 			return;
 		}
-		const transaction = db?.transaction(['animations'], 'readwrite');
-		const objectStore = transaction?.objectStore('animations');
-		const animation = { name: name, frames: frames };
-		const request = objectStore?.put(animation);
-		if (request) {
-			request.onerror = (event) => {
-				console.error('Error saving animation:', event);
-				alert('Error saving animation. Please try again.');
-			};
 
-			request.onsuccess = (event) => {
-				updateLoadAnimationSelect();
-				alert('Animation saved successfully!');
-			};
+		try {
+			project = project
+				? await saveProject({ ...project, name, frames, fps })
+				: await createProject({ name, frames, fps });
+			alert('Animation saved successfully!');
+		} catch (error) {
+			console.error('Error saving animation:', error);
+			alert('Error saving animation. Please try again.');
 		}
 	}
 
-	// Function to load animation
-	function loadAnimation() {
-		const select = document.getElementById('loadAnimationSelect') as HTMLSelectElement;
-		const name = select.value;
-		if (name && db) {
-			const transaction = db.transaction(['animations'], 'readonly');
-			const objectStore = transaction.objectStore('animations');
-			const request = objectStore.get(name);
-
-			request.onerror = (event: Event) => {
-				console.error('Error loading animation:', (event.target as IDBRequest).error);
-				alert('Error loading animation. Please try again.');
-			};
-
-			request.onsuccess = (event: Event) => {
-				const animation = (event.target as IDBRequest).result;
-				if (animation) {
-					frames = animation.frames;
-					if (frames.length > 0) {
-						const img = new Image();
-						img.src = frames[0];
-						img.onload = () => {
-							if (context) {
-								context.clearRect(0, 0, canvas.width, canvas.height);
-								context.drawImage(img, 0, 0);
-							}
-						};
-					}
-				}
-			};
-		} else {
-			console.error('Database not initialized or animation name is empty');
-		}
-	}
-
-	// Event listeners for saving and loading animations
 	onMount(() => {
-		video = document.getElementById('video') as HTMLVideoElement;
-		canvas = document.getElementById('canvas') as HTMLCanvasElement;
 		context = canvas.getContext('2d');
 		if (!id) {
 			startCamera(currentFacingMode);
 			drawPreview();
 		}
 
-		openDB().then(() => {
-			if (id) {
-				loadAnimationById(id);
-			}
-		});
+		if (id) loadProject(id);
 	});
 
-	// Function to open the database
-	function openDB(): Promise<void> {
-		return new Promise((resolve, reject) => {
-			const request = indexedDB.open('AnimationDB', 1);
+	onDestroy(() => {
+		if (previewRequestId) cancelAnimationFrame(previewRequestId);
+		urls.revokeAll();
+	});
 
-			request.onerror = (event) => {
-				console.error('Database error: ', (event.target as IDBOpenDBRequest).error);
-				reject(new Error('Failed to open database'));
-			};
-
-			request.onsuccess = (event) => {
-				db = (event.target as IDBOpenDBRequest).result;
-				console.log('Database opened successfully');
-				resolve();
-			};
-
-			request.onupgradeneeded = (event) => {
-				const db = (event.target as IDBOpenDBRequest).result;
-				if (!db.objectStoreNames.contains('animations')) {
-					db.createObjectStore('animations', { keyPath: 'name' });
-					console.log('Object store created');
-				}
-			};
-		});
-	}
-
-	async function loadAnimationById(animationId: string) {
-		if (!db) {
-			console.error('Database not initialized');
-			return;
-		}
-
+	async function loadProject(projectId: string) {
 		try {
-			const transaction = db.transaction(['animations'], 'readonly');
-			const objectStore = transaction.objectStore('animations');
-			const request = objectStore.get(animationId);
+			// Fall back to the name for links minted before ids existed.
+			const found = (await getProject(projectId)) ?? (await getProjectByName(projectId));
+			if (!found) {
+				console.log('No animation found with ID:', projectId);
+				alert('Animation not found');
+				return;
+			}
 
-			request.onerror = (event: Event) => {
-				console.error('Error loading animation:', (event.target as IDBRequest).error);
-				alert('Error loading animation. Please try again.');
-			};
+			project = found;
+			frames = found.frames;
+			fps = found.fps;
+			currentAnimationName = found.name;
 
-			request.onsuccess = (event: Event) => {
-				const animation = (event.target as IDBRequest).result;
-				if (animation) {
-					console.log('Animation loaded:', animation);
-					frames = animation.frames;
-					console.log('Frames loaded:', frames.length);
-					currentAnimationName = animation.name;
-					if (frames.length > 0) {
-						currentFrameIndex = 0; // Set to first frame
-						const img = new Image();
-						img.onload = () => {
-							if (canvas && context) {
-								canvas.width = img.width;
-								canvas.height = img.height;
-								context.clearRect(0, 0, canvas.width, canvas.height);
-								context.drawImage(img, 0, 0, canvas.width, canvas.height);
-							}
-						};
-						img.src = frames[0];
-					}
-				} else {
-					console.log('No animation found with ID:', animationId);
-					alert('Animation not found');
-				}
-			};
+			if (frames.length > 0) {
+				currentFrameIndex = 0;
+				await drawFrame(frames[0]);
+			}
 		} catch (error) {
-			console.error('Error in loadAnimationById:', error);
+			console.error('Error loading animation:', error);
 			alert('An error occurred while loading the animation');
 		}
 	}
 
-	function updateLoadAnimationSelect() {
-		const select = document.getElementById('loadAnimationSelect') as HTMLSelectElement;
-		if (!select) {
-			console.error('Load animation select not found');
-			return;
-		}
-		select.innerHTML = '<option value="">Load Animation</option>';
-		if (db) {
-			const transaction = db.transaction(['animations'], 'readonly');
-			const objectStore = transaction.objectStore('animations');
-			const request = objectStore.getAllKeys();
-			request.onsuccess = (event) => {
-				const keys = (event.target as IDBRequest).result;
-				keys.forEach((key: IDBValidKey) => {
-					const option = document.createElement('option');
-					option.value = key.toString();
-					option.textContent = key.toString();
-					select.appendChild(option);
-				});
-			};
-			request.onerror = (event) => {
-				console.error('Error loading animation keys:', event);
-			};
-		} else {
-			console.error('Database not initialized');
-		}
-	}
-
 	function newAnimation() {
+		project = null;
 		frames = [];
 		currentAnimationName = '';
+		currentFrameIndex = -1;
 		if (context) {
 			context.clearRect(0, 0, canvas.width, canvas.height);
 		}
 	}
 
-	// Add this function
 	async function deleteAnimation() {
-		if (!currentAnimationName || !db) {
-			alert('No animation selected or database not initialized.');
+		if (!project) {
+			alert('This animation has not been saved yet.');
 			return;
 		}
 
-		const confirmDelete = confirm(`Are you sure you want to delete "${currentAnimationName}"?`);
+		const confirmDelete = confirm(`Are you sure you want to delete "${project.name}"?`);
 		if (!confirmDelete) return;
 
 		try {
-			const transaction = db.transaction(['animations'], 'readwrite');
-			const objectStore = transaction.objectStore('animations');
-			const request = objectStore.delete(currentAnimationName);
-
-			request.onerror = (event) => {
-				console.error('Error deleting animation:', event);
-				alert('Error deleting animation. Please try again.');
-			};
-
-			request.onsuccess = (event) => {
-				console.log('Animation deleted successfully');
-				alert('Animation deleted successfully!');
-				goto(`${base}/`); // Navigate to the root route
-			};
+			await deleteProject(project.id);
+			goto(`${base}/`); // Navigate to the root route
 		} catch (error) {
-			console.error('Error in deleteAnimation:', error);
-			alert('An error occurred while deleting the animation');
+			console.error('Error deleting animation:', error);
+			alert('Error deleting animation. Please try again.');
 		}
 	}
 
-	function selectFrame(index: number) {
+	async function selectFrame(index: number) {
 		currentFrameIndex = index;
 		if (isPreviewActive) {
 			togglePreview();
 		}
 		if (frames[index]) {
-			const img = new Image();
-			img.onload = () => {
-				if (context) {
-					context.clearRect(0, 0, canvas.width, canvas.height);
-					context.drawImage(img, 0, 0, canvas.width, canvas.height);
-				}
-			};
-			img.src = frames[index];
+			await drawFrame(frames[index]);
 		}
 	}
 
 	function addNewFrame() {
 		isPreviewActive = true;
-		currentFrameIndex = frames.length;
+		currentFrameIndex = -1;
 		startCamera(currentFacingMode);
 		drawPreview();
 	}
@@ -377,27 +285,17 @@
 	}
 
 	async function saveEdit() {
-		if (!db || !editedName.trim()) {
+		const name = editedName.trim();
+		if (!name) {
 			alert('Please enter a valid name for the animation.');
 			return;
 		}
 
 		try {
-			const transaction = db.transaction(['animations'], 'readwrite');
-			const objectStore = transaction.objectStore('animations');
-
-			// First, delete the old entry if it exists
-			if (currentAnimationName) {
-				await objectStore.delete(currentAnimationName);
-			}
-
-			// Then, add the updated entry
-			const updatedAnimation = { name: editedName.trim(), frames: frames };
-			await objectStore.add(updatedAnimation);
-
-			currentAnimationName = editedName.trim();
+			// Unsaved projects just take the new name; saved ones rename in one put.
+			if (project) project = await renameProject(project.id, name);
+			currentAnimationName = name;
 			isEditing = false;
-			alert('Animation updated successfully!');
 		} catch (error) {
 			console.error('Error updating animation:', error);
 			alert('Error updating animation. Please try again.');
@@ -423,10 +321,10 @@
 <div class="container">
 	<div class="preview-and-controls">
 		<div class="canvas-container">
-			<video id="video" hidden autoplay playsinline>
+			<video bind:this={video} hidden autoplay playsinline>
 				<track kind="captions" src="" label="Empty captions" />
 			</video>
-			<canvas id="canvas"></canvas>
+			<canvas bind:this={canvas}></canvas>
 			{#if isPreviewActive}
 				<div
 					role="button"
@@ -446,7 +344,10 @@
 			<button on:click={togglePreview}>
 				{isPreviewActive ? 'Stop Preview' : 'Start Preview'}
 			</button>
-			<button on:click={() => playAnimation(currentFrameIndex !== -1 ? currentFrameIndex : 0)}>
+			<button
+				disabled={isPlaying}
+				on:click={() => playAnimation(currentFrameIndex !== -1 ? currentFrameIndex : 0)}
+			>
 				Play Animation
 			</button>
 			<button on:click={deleteCurrentFrame}>Delete Current Frame</button>
@@ -457,20 +358,21 @@
 			</select>
 			<input type="text" bind:value={currentAnimationName} placeholder="Animation name" />
 			<button on:click={saveAnimation}>Save Animation</button>
-			{#if id !== null}
+			<button on:click={newAnimation}>New Animation</button>
+			{#if project !== null}
 				<button on:click={deleteAnimation} class="delete-button">Delete Animation</button>
 			{/if}
 		</div>
 	</div>
 	<div class="timeline">
-		{#each frames as frame, index}
+		{#each frames as frame, index (frame)}
 			<button
 				class="frame"
 				class:active={index === currentFrameIndex}
 				on:click={() => selectFrame(index)}
 			>
 				<span class="frame-number">{index + 1}</span>
-				<img src={frame} alt={`Frame ${index + 1}`} />
+				<img src={urls.get(frame)} alt={`Frame ${index + 1}`} />
 			</button>
 		{/each}
 		{#if frames.length > 0 && !isPreviewActive}
@@ -526,6 +428,11 @@
 	button:hover,
 	button:active {
 		background: plum;
+	}
+
+	button:disabled {
+		opacity: 0.5;
+		cursor: default;
 	}
 
 	button,
