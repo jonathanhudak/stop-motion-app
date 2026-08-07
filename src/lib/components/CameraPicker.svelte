@@ -27,7 +27,20 @@
 			Refresh
 		</button>
 	</div>
-	<p class="hint">USB webcams and capture cards appear here. A DSLR needs webcam mode.</p>
+	<p class="hint">
+		{cameras.length} camera{cameras.length === 1 ? '' : 's'} detected. Only UVC devices appear here: webcams
+		and HDMI capture cards do, a DSLR only if it has a USB streaming or webcam mode switched on.
+	</p>
+	{#if cameras.length > 0}
+		<details class="detected">
+			<summary>What the browser sees</summary>
+			<ul>
+				{#each cameras as camera (camera.deviceId)}
+					<li>{camera.label}</li>
+				{/each}
+			</ul>
+		</details>
+	{/if}
 </div>
 
 <style>
@@ -58,5 +71,20 @@
 		margin: 0;
 		font-size: 0.75rem;
 		color: var(--text-muted);
+	}
+
+	.detected {
+		font-size: 0.75rem;
+		color: var(--text-muted);
+	}
+
+	.detected summary {
+		cursor: pointer;
+	}
+
+	.detected ul {
+		margin: 0.3rem 0 0;
+		padding-left: 1.1rem;
+		word-break: break-word;
 	}
 </style>

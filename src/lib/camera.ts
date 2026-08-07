@@ -85,11 +85,14 @@ export function stopStream(stream: MediaStream | null | undefined): void {
 	stream?.getTracks().forEach((track) => track.stop());
 }
 
-export function describeStream(stream: MediaStream): StreamInfo {
+export function describeStream(stream: MediaStream, requestedDeviceId?: string | null): StreamInfo {
 	const track = stream.getVideoTracks()[0];
 	const settings = track?.getSettings() ?? {};
 	return {
-		deviceId: settings.deviceId ?? null,
+		// Safari omits deviceId from getSettings(). Without this fallback the
+		// picker would snap back to "Default camera" after every selection, and
+		// the remembered device would be cleared.
+		deviceId: settings.deviceId ?? requestedDeviceId ?? null,
 		label: track?.label ?? '',
 		width: settings.width ?? 0,
 		height: settings.height ?? 0

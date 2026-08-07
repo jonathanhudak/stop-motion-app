@@ -124,7 +124,7 @@
 		}
 
 		// openCamera may have fallen back to a different device than requested.
-		const info = describeStream(stream);
+		const info = describeStream(stream, deviceId);
 		selectedDeviceId = info.deviceId;
 		savePreferredDeviceId(info.deviceId);
 		applyDimensions(info.width, info.height);
@@ -151,16 +151,21 @@
 	}
 
 	async function refreshCameras() {
+		// Without permission the device list is empty or unlabelled, so open a
+		// camera first. This is also what makes a just-plugged-in camera appear.
+		if (!stream) await startCamera(selectedDeviceId);
+
 		cameras = await listCameras();
 		if (cameras.length === 0) {
 			cameraError = 'No cameras found. Plug one in and press Refresh.';
 			return;
 		}
+
 		// The remembered camera may have been unplugged while we were running.
 		if (selectedDeviceId && !cameras.some((camera) => camera.deviceId === selectedDeviceId)) {
 			await startCamera(null);
 		} else {
-			toast.info(`${cameras.length} camera${cameras.length === 1 ? '' : 's'} available.`);
+			toast.info(`Found ${cameras.length} camera${cameras.length === 1 ? '' : 's'}.`);
 		}
 	}
 
@@ -552,9 +557,7 @@
 			</video>
 			<canvas bind:this={canvas}></canvas>
 
-			{#if isPreviewActive}
-				<button class="shutter" aria-label="Capture frame" on:click={captureFrame}></button>
-			{:else if !isPlaying}
+			{#if !isPreviewActive && !isPlaying}
 				<button class="resume" on:click={resumeShooting}>Back to live view</button>
 			{/if}
 		</div>
@@ -696,32 +699,6 @@
 		width: 100%;
 		height: 100%;
 		object-fit: contain;
-	}
-
-	.shutter {
-		position: absolute;
-		right: 1rem;
-		top: 50%;
-		transform: translateY(-50%);
-		width: 3.25rem;
-		height: 3.25rem;
-		padding: 0;
-		border: 3px solid rgba(255, 255, 255, 0.9);
-		border-radius: 50%;
-		background: var(--accent);
-		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
-	}
-
-	.shutter:hover {
-		background: var(--accent);
-		filter: brightness(1.15);
-	}
-
-	@media (min-width: 768px) {
-		.shutter {
-			width: 4.5rem;
-			height: 4.5rem;
-		}
 	}
 
 	.resume {
